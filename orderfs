@@ -1,0 +1,74 @@
+#!/usr/bin/perl
+
+use strict;
+use feature 'signatures';
+
+use File::Spec;
+use Getopt::Long;
+
+my $verbose = '';
+my $recordsep = "\n";
+my $filesep = '/';
+my $tinyfilesizecutoff = 0;
+
+# { Filetype => [ (path, filename, filesize) ] }
+my @files = [];
+sub build_tree($filename, $prefix='') {
+  my $path = length($prefix) ? File::Spec->catfile($prefix, $filename) : $filename;
+  if( -d $path ) {
+    opendir(my $dir, $path) || die("unable to open dir: $!");
+    my @subpaths = readdir($dir);
+    closedir($dir);
+    return map { build_tree($_, $path) } File::Spec->no_upwards(@subpaths);
+  }
+
+  my $size = -s $path;
+  my $ft = filetype($path, $size);
+  push @files, [$ft, $path, $filename, $size];
+  return
+}
+
+sub filetype($filename, $size) {
+  if($size == 0) {
+    return 'EMPTYFILE-0000';
+  }
+  if($size < $tinyfilesizecutoff) {
+    return 'TINYFILE-1000';
+  }
+  my ($v, $d, $f) = File::Spec->splitpath( $filename );
+  my @ext = split(/\./, $f);
+  return pop @ext;
+}
+
+GetOptions( 'verbose' => \$verbose,
+            'tinyfilesize=i' => \$tinyfilesizecutoff,
+            'print0' => sub { $recordsep = "\0" },
+            '<>' => \&build_tree
+          );
+
+sub bySizeBins {
+  my @a = @{$a};
+  my @b = @{$b};
+  if( $a[3] < 16384 && $b[3] < 16384 ) {
+      return 0;
+  }
+  $a[3] <=> $b[3]
+}
+
+sub byTypeSizeName {
+  my @a = @{$a};
+  my @b = @{$b};
+  ($a[0] cmp $b[0])
+      || bySizeBins($a, $b)
+      || ($a[2] cmp $b[2])
+}
+
+sub toDebugName {
+  $_->[0] . " -- " . $_->[3] . " -- " . $_->[2]
+}
+
+sub toName {
+  $_->[1]
+}
+
+print join($recordsep, map toName, sort byTypeSizeName @files);
